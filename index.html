@@ -1,0 +1,389 @@
+<html>
+  <head>
+    <style type="text/css">
+      body, html, input {
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif
+      }
+      .control-panel {
+        margin: 0 0 5px 0;
+      }
+      .control-panel .form-input {
+        width: 30px;
+      }
+      .row { 
+        clear: both; 
+        overflow: auto;
+        margin: 0 0 -1px 0;
+      }
+      .cell {
+        float: left;
+        border-collapse: collase;
+        margin: 0 -1px 0 0;
+        border: 1px solid #EEEEEE; 
+      }
+      .row:first-child .cell, .cell.T {
+        border-top-color: #808080;
+      }
+      .row:last-child .cell, .cell.B {
+        border-bottom-color: #808080;
+      }
+      .cell:first-child, .cell.L, .cell.R + .cell {
+        border-left-color: #808080;
+      }
+      .cell:last-child, .cell.R {
+        border-right-color: #808080;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app" >
+      <div>
+        <label>Dimension</label>
+        <input class="form-input" v-model="rows" />
+        <label>x</label>
+        <input class="form-input" v-model="cols" />
+        <label>Cell length</label>
+        <input class="form-input" v-model="celllength" />
+        <button @click="prevPath" @keydown.left="prevPath">&lt;</button>
+        <button @click="nextPath" @keydown.right="nextPath">&gt;</button>
+        <button @click="generateWalls">Gen</button>
+        <button @click="clearWalls">Clear</button>
+        <span v-if="paths.length">{{ pathIndex + 1 }}/{{ paths.length }}</label>
+      </div>
+      <grid :rows="rows" :cols="cols" :celllength="celllength" :walls="walls" :path="path"></grid>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/vue"></script>
+    <script>
+      let profiles = {}
+
+      function profile(name, fn) {
+        const startTime = Date.now()
+        const res = fn.call(this)
+        const elapsed = (Date.now() - startTime) / 1000
+        if (!profiles[name]) {
+          profiles[name] = {count: 0, totalElapsed: 0}
+        }
+        profiles[name].count++
+        profiles[name].totalElapsed += elapsed
+        return res
+      }
+
+      function printProfiles() {
+        for (let k in profiles) {
+          console.log(`${k} took ${profiles[k].totalElapsed} secs for ${profiles[k].count} iterations`)
+        }
+      }
+
+      function clearProfiles() {
+        profiles = {}
+      }
+
+      function isBlocked(row, col, dir, walls) {
+        const cellWalls = walls[row + ' ' + col]
+        if (cellWalls && cellWalls.indexOf(dir) != -1) {
+          return true
+        } else if (dir == 'L') {
+          return isBlocked(row, col-1, 'R', walls)
+        } else if (dir == 'T') {
+          return isBlocked(row-1, col, 'B', walls)
+        } else {
+          return false
+        }
+      }
+
+      function* findPaths(startRow, startCol, endRow, endCol, walls) {
+        let walked = (row, col, cellPaths) => {
+          return profile('walk path', () => cellPaths.filter(cellPath => row == cellPath[0] && col == cellPath[1]).length > 0)
+        }
+        const q = []
+        q.push([startRow, startCol, []])
+        while (q.length) {
+          const cell = q.pop()
+          const [row, col, cellPaths] = cell
+          if (row == endRow && col == endCol) {
+            yield [...cellPaths, [row, col, 'dest']]
+          } else {
+            if (row > 0 && !isBlocked(row, col, 'T', walls) && !walked(row - 1, col, cellPaths)) {
+              q.push([row - 1, col, [...cellPaths, [row, col, 'T']]])
+            }
+            if (col > 0 && !isBlocked(row, col, 'L', walls) && !walked(row, col - 1, cellPaths)) {
+              q.push([row, col - 1, [...cellPaths, [row, col, 'L']]])
+            }
+            if (row < endRow && !isBlocked(row, col, 'B', walls) && !walked(row + 1, col, cellPaths)) {
+              q.push([row + 1, col, [...cellPaths, [row, col, 'B']]])
+            }
+            if (col < endCol && !isBlocked(row, col, 'R', walls) && !walked(row, col + 1, cellPaths)) {
+              q.push([row, col + 1, [...cellPaths, [row, col, 'R']]])
+            }
+          }
+        }
+      }
+
+      function generateWalls(rows, cols) {
+        const walls = {}
+        const threshold = 0.4
+        let lastDirs = []
+        for (let i=0; i<rows; i++) {
+          for (let j=0; j<cols; j++) {
+            let dirs = []
+            if (lastDirs.indexOf('R') == -1 && Math.random() < threshold) {
+              dirs.push('R')
+            } else if (lastDirs.indexOf('B') == -1 && Math.random() < threshold) {
+              dirs.push('B')
+            }
+            if (dirs.length > 0) {
+              walls[i + ' ' + j] = dirs.join(' ')
+            }
+            lastDirs = dirs
+          }
+        }
+        return walls
+      }
+
+      Vue.component('arrow', {
+        props: ['dir'],
+        computed: {
+          transform: function() {
+            const scale = 0.8, t = []
+            if (scale != 1) {
+              const offset = 50 * (1 - scale)
+              t.push(`scale(${scale} ${scale})`)
+              t.push(`translate(${offset} ${offset})`)
+            }
+            const rotateAngles = {
+              T: 0,
+              R: 90,
+              B: 180,
+              L: 270,
+              dest: 90
+            }
+            t.push(`rotate(${rotateAngles[this.dir]} 50 50)`)
+            return t.join(' ')
+          },
+          pathClass: function() {
+            return 'path' + (this.dir ? ' ' + this.dir : '')
+          }
+        },
+        template: `
+          <svg viewBox="0 0 100 100">
+            <g :transform="transform">
+              <path d="M 25 42 l 25 -27 l 25 27" stroke="red" stroke-width="8" fill="none" />
+              <path d="M50 15 l 0 70" stroke="red" stroke-width="8" fill="none" />
+            </g>
+          </svg>
+        `
+      })
+
+      Vue.component('grid', {
+        props: ['rows', 'cols', 'walls', 'path', 'celllength'],
+        computed: {
+          gridStyle: function() {
+            const w = this.cols * (this.celllength + 1) + 1
+            const h = this.rows * (this.celllength + 1) + 1
+            return {
+              width: w + 'px',
+              height: h + 'px'
+            }
+          },
+          cellStyle: function() {
+            return {
+              width: this.celllength + 'px',
+              height: this.celllength + 'px'
+            } 
+          }
+        },
+        methods: {
+          getDirs: function(row, col) {
+            const cellWalls = this.walls[row + ' ' + col]
+            return cellWalls ? cellWalls.split(' ') : []
+          },
+          toggleWall: function(row, col, dir, flag) {
+            if (row >= 0 && col >= 0 && row <= this.rows-1 && col <= this.cols-1) {
+              let curDirs = this.getDirs(row, col)
+              let updated = false
+              const contains = curDirs.indexOf(dir) != -1
+              if (flag) {
+                if (!contains) {
+                  curDirs.push(dir)
+                  updated = true
+                }
+              } else if (flag === false) {
+                if (contains) {
+                  curDirs = curDirs.filter(d => d != dir)
+                  updated = true
+                }
+              } else if (!flag) {
+                this.toggleWall(row, col, dir, !contains) 
+              }
+              if (updated) {
+                this.walls[row + ' ' + col] = curDirs.length > 0 ? curDirs.join(' ') : undefined
+                this.$parent.newPath()
+                console.log(`${row} ${col} -> ${this.walls[row + ' ' + col]}`)
+              }
+            }
+          },
+          clickGrid: function(e) {
+            const grid = e.path.filter(el => el.className == 'grid')[0]
+            if (grid) {
+              const threshold = 0.3
+              const x = e.pageX - grid.offsetLeft
+              const y = e.pageY - grid.offsetTop
+              const rowExact = y / (Number(this.celllength) + 1)
+              const colExact = x / (Number(this.celllength) + 1)
+              const rowDiff = Math.abs(rowExact - Math.round(rowExact))
+              const colDiff = Math.abs(colExact - Math.round(colExact))
+              // console.log({x, y, rowExact, colExact, rowDiff, colDiff, celllength: this.celllength})
+              let row, col
+              if (rowDiff < threshold) {
+                row = Math.floor(rowExact) - (rowExact < Math.round(rowExact) ? 0 : 1)
+                col = Math.floor(colExact)
+                this.toggleWall(row, col, 'B')
+              } 
+              if (colDiff < threshold) {
+                row = Math.floor(rowExact)
+                col = Math.floor(colExact) - (colExact < Math.round(colExact) ? 0 : 1)
+                this.toggleWall(row, col, 'R')
+              }         
+            }
+          },
+          cellClass: function(row, col) {
+            return profile('cellClass', () => {
+              const dirs = this.getDirs(row, col)
+              if (dirs.indexOf('L') == -1) {
+                const leftDirs = this.getDirs(row, col-1)
+                if (leftDirs.indexOf('R') != -1) {
+                  dirs.push('L')
+                }
+              }
+              if (dirs.indexOf('T') == -1) {
+                const topDirs = this.getDirs(row-1, col)
+                if (topDirs.indexOf('B') != -1) {
+                  dirs.push('T')
+                }
+              }
+              return ['cell', ...dirs].join(' ')
+            })
+          },
+          getDir: function(i, j) {
+            return profile('getDir', () => {
+              const path = this.path
+              if (path) {
+                for (let pi=0; pi<path.length; pi++) {
+                  if (i == path[pi][0] && j == path[pi][1]) {
+                    return path[pi][2]
+                  }
+                }
+              }
+              return undefined
+            })
+          }
+        },
+        mounted: function() {
+          console.log('grid mounted')
+          printProfiles()
+          clearProfiles()
+        },
+        updated: function() {
+          this.$nextTick(function() {
+            printProfiles()
+            clearProfiles()
+          })
+        },
+        template: `
+          <div class="grid" @click="clickGrid" :style="gridStyle">
+            <div v-for="i in Number(rows)" class="row" :row="i-1">
+              <div v-for="j in Number(cols)" :class="cellClass(i-1, j-1)" :row="i-1" :col="j-1" :style="cellStyle">
+                <arrow v-if="getDir(i-1, j-1)" :dir="getDir(i-1, j-1)"></div>
+              </div>
+            </div>
+          </div>
+        `
+      })
+
+      const data = {
+        rows: 5,
+        cols: 5,
+        celllength: 50,
+        walls: {
+          "0 0": "R",
+          "1 0": "B",
+          "1 1": "B R",
+          "1 2": "B",
+          "2 1": "R",
+          "2 6": "B",
+          "2 7": "B",
+          "2 8": "B",
+          "1 2": "R",
+          "1 3": "B",
+          "2 3": "B",
+          "3 0": "R",
+          "3 1": "B",
+          "3 2": "B",
+          "3 3": "B",
+          "3 4": "B"
+        },
+        path: undefined,
+        paths: [],
+        pathIndex: undefined
+      }
+
+      const app = new Vue({
+        el: '#app',
+        watch: {
+          rows: function(val) {
+            this.newPath()
+          },
+          cols: function(val) {
+            this.newPath()
+          },
+          walls: function(val) {
+            this.newPath()
+          }
+        },
+        methods: {
+          newPath: function() {
+            this.pathItr = null
+            this.nextPath()
+          },
+          nextPath: function() {
+            if (!this.pathItr) {
+              this.pathItr = findPaths(0, 0, this.rows-1, this.cols-1, this.walls)
+              this.paths = []
+              this.pathIndex = undefined
+              console.log('Scanning path')
+            }
+            if (this.pathIndex < this.paths.length - 1) {
+              this.pathIndex++
+            } else {
+              const path = profile('nextPath', () => this.pathItr.next().value)
+              if (path) {
+                this.paths.push(path)
+                this.pathIndex = this.paths.length - 1
+                // console.log('Found new path', path)
+              } else {
+                this.pathIndex = (this.pathIndex + 1) % this.paths.length
+              }
+            }
+            this.path = this.paths[this.pathIndex]
+            console.log('Path index', this.pathIndex)
+          },
+          prevPath: function() {
+            this.pathIndex = (this.pathIndex + this.paths.length - 1) % this.paths.length
+            this.path = this.paths[this.pathIndex]
+            console.log('Path index', this.pathIndex)
+          },
+          generateWalls: function() {
+            this.walls = generateWalls(this.rows, this.cols)
+          },
+          clearWalls: function() {
+            this.walls = {}
+          }
+        },
+        created: function() {
+          this.newPath()
+        },
+        data: data
+      })
+    </script>
+  </body>
+</html>
